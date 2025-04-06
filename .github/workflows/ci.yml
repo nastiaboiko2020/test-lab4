@@ -20,6 +20,18 @@ jobs:
           sudo apt-get install docker-compose -y
       - name: Start LocalStack with Docker Compose
         run: docker-compose up -d
+      - name: Wait for LocalStack to be ready
+        run: |
+          echo "Waiting for LocalStack to be ready..."
+          for i in {1..30}; do
+            if curl -s http://localhost:4566/health | grep -q "running"; then
+              echo "LocalStack is ready!"
+              break
+            fi
+            echo "Waiting... ($i/30)"
+            sleep 2
+          done
+          curl -s http://localhost:4566/health
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
@@ -30,10 +42,17 @@ jobs:
           exitcode="$?"
           echo "exitcode=$exitcode" >> $GITHUB_OUTPUT
           exit "$exitcode"
-      - name: Run integration tests
+      - name: Run pytest
+        env:
+          PYTHONPATH: "."
         run: |
           pytest --maxfail=1 --disable-warnings -v
-          coverage run -m pytest && coverage report -m
+      - name: Run coverage
+        env:
+          PYTHONPATH: "."
+        run: |
+          coverage run -m pytest
+          coverage report -m
       - name: Teardown Docker
         if: always()
         run: docker-compose down
