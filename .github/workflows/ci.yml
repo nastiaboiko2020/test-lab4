@@ -5,52 +5,7 @@ on:
   pull_request:
     branches: [ "main" ]
 jobs:
-  unit-tests:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.8", "3.9"]
-    steps:
-      - name: Check out the repository
-        uses: actions/checkout@v3
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: ${{ matrix.python-version }}
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-      - name: Run unit tests
-        env:
-          PYTHONPATH: "."
-        run: |
-          pytest tests/test_unit.py --maxfail=1 --disable-warnings -v
-          coverage run -m pytest tests/test_unit.py && coverage report -m
-
-  bdd-tests:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.8", "3.9"]
-    steps:
-      - name: Check out the repository
-        uses: actions/checkout@v3
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: ${{ matrix.python-version }}
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-      - name: Run BDD tests
-        env:
-          PYTHONPATH: "."
-        run: |
-          behave tests/features --no-capture
-
-  integration-tests:
+  tests:
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -67,40 +22,57 @@ jobs:
           sudo apt-get update
           sudo apt-get install docker-compose -y
       - name: Start LocalStack with Docker Compose
-        run: docker-compose up -d
-      - name: Wait for LocalStack to be ready
-        run: |
-          echo "Waiting for LocalStack to be ready..."
-          for i in {1..30}; do
-            if curl -s http://localhost:4566/health | grep -q "running"; then
-              echo "LocalStack is ready!"
-              break
-            fi
-            echo "Waiting... ($i/30)"
-            sleep 2
-          done
-          curl -s http://localhost:4566/health
+        run: docker-compose up -d  
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-      - name: Run pylint
+      - name: Set PYTHONPATH
         run: |
+          echo "PYTHONPATH=$PYTHONPATH:$GITHUB_WORKSPACE" >> $GITHUB_ENV
+      - name: Run pylint
+        run: | 
           pylint --fail-under 7 app
           exitcode="$?"
           echo "exitcode=$exitcode" >> $GITHUB_OUTPUT
           exit "$exitcode"
-      - name: Run pytest
-        env:
-          PYTHONPATH: "."
+      - name: Run unit tests
         run: |
-          pytest --maxfail=1 --disable-warnings -v
+          pytest tests/test_unit.py --maxfail=1 --disable-warnings -v
+      - name: Run integration tests
+        run: |
+          pytest tests/test_integration.py --maxfail=1 --disable-warnings -v
+      - name: Run BDD tests
+        run: |
+          pip install behave
+          behave tests/features
       - name: Run coverage
-        env:
-          PYTHONPATH: "."
         run: |
-          coverage run -m pytest
-          coverage report -m
+          coverage run -m pytest && coverage report -m
       - name: Teardown Docker
         if: always()
         run: docker-compose down
+      - name: Send email on success
+        if: success()
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: ${{ secrets.SMTP_SERVER }}
+          server_port: ${{ secrets.SMTP_PORT }}
+          username: ${{ secrets.SMTP_USERNAME }}
+          password: ${{ secrets.SMTP_PASSWORD }}
+          subject: "CI Success: ${{ github.repository }}"
+          body: "The CI pipeline for ${{ github.repository }} has completed successfully!"
+          to: your.email@example.com
+          from: ${{ secrets.SMTP_USERNAME }}
+      - name: Send email on failure
+        if: failure()
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: ${{ secrets.SMTP_SERVER }}
+          server_port: ${{ secrets.SMTP_PORT }}
+          username: ${{ secrets.SMTP_USERNAME }}
+          password: ${{ secrets.SMTP_PASSWORD }}
+          subject: "CI Failure: ${{ github.repository }}"
+          body: "The CI pipeline for ${{ github.repository }} has failed. Check the logs for details."
+          to: your.email@example.com
+          from: ${{ secrets.SMTP_USERNAME }}
